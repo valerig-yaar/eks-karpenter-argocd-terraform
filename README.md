@@ -94,6 +94,23 @@ You can optionally use [GitHubA2AWS](https://github.com/valerig-yaar/GitHubA2AWS
 
 This integration is especially useful for managing ArgoCD root apps or syncing app-of-apps flows via GitOps.
 
+### Optional: Use Remote State with S3
+
+To enable remote state storage using S3 and DynamoDB for locking, initialize Terraform like this:
+
+```bash
+terraform init -migrate-state \
+  -backend-config="bucket=${TF_VAR_tf_state_bucket_name}" \
+  -backend-config="dynamodb_table=${TF_VAR_tf_locks_table_name}" \
+  -backend-config="region=${TF_VAR_region}"
+```
+
+You will need to define the following environment variables:
+
+* `TF_VAR_tf_state_bucket_name` – Name of the S3 bucket
+* `TF_VAR_tf_locks_table_name` – Name of the DynamoDB table
+* `TF_VAR_region` – AWS region
+
 ## Notes
 
 * Karpenter EC2NodeClasses and Provisioners should be applied separately
