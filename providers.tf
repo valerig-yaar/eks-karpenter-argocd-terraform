@@ -5,6 +5,11 @@ provider "aws" {
   }
 }
 
+provider "aws" {
+  region = "us-east-1"
+  alias = "ecr_public"
+}
+
 terraform {
   backend "s3" {
     bucket         = "REPLACE_ME"
