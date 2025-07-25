@@ -1,0 +1,86 @@
+name: Terraform Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform action to perform'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - plan-apply
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Assume Terraform Role
+        id: assume_terraform
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          CREDS=$(aws sts assume-role \
+            --role-arn ${{ secrets.AWS_ROLE_TO_ASSUME_TF }} \
+            --role-session-name github-actions-session)
+          echo "AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)" >> $GITHUB_ENV
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init with backend config from secrets
+        env:
+          TF_VAR_tf_state_bucket_name: ${{ secrets.TF_STATE_BUCKET_NAME }}
+          TF_VAR_tf_locks_table_name: ${{ secrets.TF_LOCKS_TABLE_NAME }}
+          TF_VAR_region: ${{ secrets.AWS_REGION }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${TF_VAR_tf_state_bucket_name}" \
+            -backend-config="dynamodb_table=${TF_VAR_tf_locks_table_name}" \
+            -backend-config="region=${TF_VAR_region}"
+
+      - name: Scan Terraform with Checkov
+        run: |
+          pip install checkov
+          checkov -d . --quiet --soft-fail --output json > checkov-report.json
+          cat checkov-report.json | jq -r '
+          .[0].results.failed_checks
+          | map(select(.severity == "HIGH" or .severity == "CRITICAL"))
+          | if length > 0 then
+              (map("High/Critical issue: \(.check_id) - \(.check_name) in \(.file_path) for resource \(.resource)") | .[]),
+              error("High or critical Checkov issue found")
+            else
+              "Checkov passed with no high or critical issues"
+            end
+          '
+          
+      - name: Terraform Plan
+        if: ${{ github.event.inputs.action == 'plan' || github.event.inputs.action == 'plan-apply' || github.event_name == 'push' || github.event_name == 'pull_request' }}
+        run: terraform plan
+
+      - name: Terraform Apply
+        if: ${{ github.event.inputs.action == 'plan-apply' || github.event_name == 'push' }}
+        run: terraform apply -auto-approve
