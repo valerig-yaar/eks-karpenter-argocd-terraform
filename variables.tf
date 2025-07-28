@@ -17,6 +17,7 @@ locals {
     Terraform   = "true"
     Environment = "dev"
     Owner       = "ValeriG"
+    Project     = "assignment-eks"
   }
 }
 
